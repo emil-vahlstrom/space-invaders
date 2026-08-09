@@ -509,10 +509,16 @@ class SpaceInvaders(object):
     def get_bullets(self):
         danger_bullets = [
             b for b in self.enemyBullets
-            if b.rect.centery < self.player.rect.centery
-            and abs(b.rect.centerx - self.player.rect.centerx) < (self.player.rect.width / 2 + 3)
-            #and (self.player.rect.centery - b.rect.centery) > 50
+            if b.rect.right > self.player.rect.left
+            and b.rect.left < self.player.rect.right
+            and b.rect.bottom <= self.player.rect.top
+            and (self.player.rect.top - b.rect.bottom) <= 70
         ]
+
+        # if len(danger_bullets) > 0:
+        #     for bullet in danger_bullets:
+        #         print(bullet.rect)
+        #     print("self.player.rect", self.player.rect)
         danger_bullets = sorted(
             danger_bullets,
             key=lambda b:
@@ -901,15 +907,16 @@ class SpaceInvaders(object):
         
         reward -= ( heat * 10)
 
-        #if heat > 0:
-        #    print("heat", reward)
+        #if heat > 0: print("heat", reward)
+            #input("kill me")
 
         #if heat > 0: print("HEAT", reward)
 
         target_dx, _ = self.get_target()
 
         if abs(target_dx) > 0.03:
-            reward -= abs(target_dx) * 100
+            pass
+            #reward -= abs(target_dx) * 100
         #    print("punished for being far away", reward)
         else:
             reward += 0.1
@@ -917,8 +924,7 @@ class SpaceInvaders(object):
 
         done = self.gameOver
 
-        #if reward < 0:
-        #    print("reward", reward)
+        #if reward < -1 or reward > 1: print("reward", reward)
 
         return state, reward, done
 
