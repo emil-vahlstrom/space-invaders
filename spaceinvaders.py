@@ -7,6 +7,11 @@ from pygame import *
 import sys
 from os.path import abspath, dirname
 from random import choice
+import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
+
+SPEED_LEVELS = (1, 10, 50)
 
 BASE_PATH = abspath(dirname(__file__))
 FONT_PATH = BASE_PATH + '/fonts/'
@@ -20,6 +25,15 @@ YELLOW = (241, 255, 0)
 BLUE = (80, 255, 239)
 PURPLE = (203, 0, 255)
 RED = (237, 28, 36)
+
+ACTIONS = [
+    (0, False),     # 0: stay
+    (-1, False),    # 1: left
+    (1, False),     # 2: right
+    (0, True),      # 3: shoot
+    (-1, True),     # 4: left + shoot
+    (1, True)       # 5: right + shoot
+]
 
 SCREEN = display.set_mode((800, 600))
 FONT = FONT_PATH + 'space_invaders.ttf'
@@ -46,11 +60,10 @@ class Ship(sprite.Sprite):
         self.rect = self.image.get_rect(topleft=(375, 540))
         self.speed = 5
 
-    def update_logic(self, keys):
-        if keys[K_LEFT] and self.rect.x > 10:
+    def update_logic(self, direction):
+        if direction == -1 and self.rect.x > 10:
             self.rect.x -= self.speed
-
-        if keys[K_RIGHT] and self.rect.x < 740:
+        elif direction == 1 and self.rect.x < 740:
             self.rect.x += self.speed
 
     def update(self, *args):
@@ -284,6 +297,10 @@ class EnemyExplosion(sprite.Sprite):
         elif 400 < passed:
             self.kill()
 
+    def update_logic(self, current_time):
+        if current_time - self.timer > 400:
+            self.kill()
+
 
 class MysteryExplosion(sprite.Sprite):
     def __init__(self, mystery, score, current_time, *groups):
@@ -299,6 +316,10 @@ class MysteryExplosion(sprite.Sprite):
         elif 600 < passed:
             self.kill()
 
+    def update_logic(self, current_time):
+        if current_time - self.timer > 600:
+            self.kill()
+
 
 class ShipExplosion(sprite.Sprite):
     def __init__(self, ship, current_time, *groups):
@@ -312,6 +333,10 @@ class ShipExplosion(sprite.Sprite):
         if 300 < passed <= 600:
             game.screen.blit(self.image, self.rect)
         elif 900 < passed:
+            self.kill()
+
+    def update_logic(self, current_time):
+        if current_time - self.timer > 900:
             self.kill()
 
 
@@ -337,8 +362,17 @@ class Text(object):
 
 
 class SpaceInvaders(object):
-    def __init__(self):
-        self.steps_per_render = 2
+    def __init__(self, start_speed=1):
+        self.speed_index = SPEED_LEVELS.index(start_speed)
+        self.speed_multiplier = start_speed
+
+        global game
+        game = self
+
+        self.simulation_time = 0
+
+        self.shoot_requested = False
+        #self.steps_per_render = steps_per_render
         # It seems, in Linux buffersize=512 is not enough, use 4096 to prevent:
         #   ALSA lib pcm.c:7963:(snd_pcm_recover) underrun occurred
         mixer.pre_init(44100, -16, 1, 4096)
@@ -369,7 +403,202 @@ class SpaceInvaders(object):
         self.life3 = Life(769, 3)
         self.livesGroup = sprite.Group(self.life1, self.life2, self.life3)
 
+    def cycle_speed(self):
+        self.speed_index = (self.speed_index + 1) % len(SPEED_LEVELS)
+        self.speed_multiplier = SPEED_LEVELS[self.speed_index]
+
+        print(f"Speed: x{self.speed_multiplier}")
+
+    def advance(self, action):
+        self.simulation_time += STEP_MS
+
+        # Between rounds
+        if not self.enemies and not self.explosionsGroup:
+            if self.simulation_time - self.gameTimer >= 3000:
+                self.enemyPosition += ENEMY_MOVE_DOWN
+                self.reset(self.score)
+
+            return self.get_state(), 0, self.gameOver
+        
+        return self.game_step(self.simulation_time, action)
+
+    # def get_state(self):
+    #     danger_bullets = [
+    #         b for b in self.enemyBullets
+    #         if b.rect.centery < self.player.rect.centery
+    #     ]
+
+    #     # bullet = min(
+    #     #     danger_bullets,
+    #     #     key=lambda b:
+    #     #         3 * abs(b.rect.centerx - self.player.rect.centerx)
+    #     #         + (self.player.rect.centery - b.rect.centery),
+    #     #     default=None
+    #     # )
+
+    #     # bullet_dx = (
+    #     #     (bullet.rect.centerx - self.player.rect.centerx) / 800
+    #     #     if bullet else 0
+    #     # )
+
+    #     # bullet_dy = (
+    #     #     (bullet.rect.centery - self.player.rect.centery) / 600
+    #     #     if bullet else 0
+    #     # )
+
+    #     danger_bullets = sorted(
+    #         danger_bullets,
+    #         key=lambda b:
+    #             3 * abs(b.rect.centerx - self.player.rect.centerx)
+    #             + (self.player.rect.centery - b.rect.centery)
+    #     )
+
+    #     bullet1 = danger_bullets[0] if len(danger_bullets) > 0 else None
+    #     bullet2 = danger_bullets[1] if len(danger_bullets) > 1 else None
+
+    #     bullet1_dx = (
+    #         (bullet1.rect.centerx - self.player.rect.centerx) / 800
+    #         if bullet1 else 0
+    #     )
+
+    #     bullet1_dy = (
+    #         (bullet1.rect.centery - self.player.rect.centery) / 600
+    #         if bullet1 else 0
+    #     )
+
+    #     bullet2_dx = (
+    #         (bullet2.rect.centerx - self.player.rect.centerx) / 800
+    #         if bullet2 else 0
+    #     )
+
+    #     bullet2_dy = (
+    #         (bullet2.rect.centery - self.player.rect.centery) / 600
+    #         if bullet2 else 0
+    #     ) 
+
+    #     target = min(
+    #         self.enemies,
+    #         key=lambda e: abs(e.rect.centerx - self.player.rect.centerx),
+    #         default=None
+    #     )
+
+    #     target_dx = (target.rect.centerx - self.player.rect.centerx) / 800 if target else 0
+    #     target_dy = (target.rect.centery - self.player.rect.centery) / 600 if target else 0
+
+    #     enemy_direction = self.enemies.direction
+
+    #     return np.array([
+    #         self.player.rect.x / 800,
+
+    #         #bullet.rect.x / 800 if bullet else 0,
+    #         #bullet.rect.y / 600 if bullet else 0,
+    #         bullet1_dx,
+    #         bullet1_dy,
+    #         bullet2_dx,
+    #         bullet2_dy,
+
+    #         #target.rect.x / 800 if target else 0,
+    #         #target.rect.y / 600 if target else 0,
+    #         target_dx,
+    #         target_dy,
+
+    #         1.0 if self.bullets else 0.0,
+    #         1.0 if enemy_direction == 1 else 0.0
+    #     ], dtype=np.float32)
+
+    def get_bullets(self):
+        danger_bullets = [
+            b for b in self.enemyBullets
+            if b.rect.centery < self.player.rect.centery
+            and abs(b.rect.centerx - self.player.rect.centerx) < (self.player.rect.width / 2 + 3)
+            #and (self.player.rect.centery - b.rect.centery) > 50
+        ]
+        danger_bullets = sorted(
+            danger_bullets,
+            key=lambda b:
+                3 * abs(b.rect.centerx - self.player.rect.centerx)
+                + (self.player.rect.centery - b.rect.centery)
+        )
+
+        bullet1 = danger_bullets[0] if len(danger_bullets) > 0 else None
+        bullet2 = danger_bullets[1] if len(danger_bullets) > 1 else None
+
+        #print(f"bullet1: {bullet1}, bullet2: {bullet2}")
+
+        bullet1_dx = (
+            (bullet1.rect.centerx - self.player.rect.centerx) / 800
+            if bullet1 else 0
+        )
+
+        bullet1_vertical_heat = (
+            bullet1.rect.centery / self.player.rect.top
+            if bullet1 else 0
+        )
+
+        bullet2_dx = (
+            (bullet2.rect.centerx - self.player.rect.centerx) / 800
+            if bullet2 else 0
+        )
+
+        bullet2_vertical_heat = (
+            bullet2.rect.centery / self.player.rect.top
+            if bullet2 else 0
+        )
+
+        return bullet1_dx, bullet1_vertical_heat, bullet2_dx, bullet2_vertical_heat
+
+    def get_target(self):
+        target = min(
+            self.enemies,
+            key=lambda e: abs(e.rect.centerx - self.player.rect.centerx),
+            default=None
+        )
+
+        target_dx = (target.rect.centerx - self.player.rect.centerx) / 800 if target else 0
+        target_dy = (target.rect.centery - self.player.rect.centery) / 600 if target else 0
+
+        return target_dx, target_dy
+
+    def get_state(self):
+        bullet1_dx, bullet1_vertical_heat, bullet2_dx, bullet2_vertical_heat = self.get_bullets()
+
+        target_dx, target_dy = self.get_target()
+
+        enemy_direction = self.enemies.direction
+
+        return np.array([
+            self.player.rect.x / 800,
+
+            bullet1_dx,
+            bullet1_vertical_heat,
+            bullet2_dx,
+            bullet2_vertical_heat,
+
+            target_dx,
+            target_dy,
+
+            1.0 if self.bullets else 0.0,
+            1.0 if enemy_direction == 1 else 0.0
+        ], dtype=np.float32)
+
+    def reset_game(self):
+        self.allBlockers = sprite.Group(
+            self.make_blockers(1),
+            self.make_blockers(2),
+            self.make_blockers(3),
+            self.make_blockers(4)
+        )
+
+        self.livesGroup.add(self.life1, self.life2, self.life3)
+        self.enemyPosition = ENEMY_DEFAULT_POSITION
+        self.gameOver = False
+
+        self.reset(0)
+
+        return self.get_state()
+
     def reset(self, score):
+        self.gameOver = False
         self.simulation_time = time.get_ticks()
         self.player = Ship()
         self.playerGroup = sprite.Group(self.player)
@@ -432,6 +661,26 @@ class SpaceInvaders(object):
         # type: (pygame.event.EventType) -> bool
         return evt.type == QUIT or (evt.type == KEYUP and evt.key == K_ESCAPE)
 
+    def shoot(self):
+        if len(self.bullets) == 0 and self.shipAlive:
+            if self.score < 1000:
+                bullet = Bullet(self.player.rect.x + 23,
+                                self.player.rect.y + 5, -1,
+                                15, 'laser', 'center')
+                self.bullets.add(bullet)
+                self.allSprites.add(bullet)
+                self.sounds['shoot'].play()
+            else:
+                leftbullet = Bullet(self.player.rect.x + 8,
+                                    self.player.rect.y + 5, -1,
+                                    15, 'laser', 'left')
+                rightbullet = Bullet(self.player.rect.x + 38,
+                                        self.player.rect.y + 5, -1,
+                                        15, 'laser', 'right')
+                self.bullets.add(leftbullet, rightbullet)
+                self.allSprites.add(leftbullet, rightbullet)
+                self.sounds['shoot2'].play()
+
     def check_input(self):
         self.keys = key.get_pressed()
         for e in event.get():
@@ -439,25 +688,9 @@ class SpaceInvaders(object):
                 sys.exit()
             if e.type == KEYDOWN:
                 if e.key == K_SPACE:
-                    if len(self.bullets) == 0 and self.shipAlive:
-                        if self.score < 1000:
-                            bullet = Bullet(self.player.rect.x + 23,
-                                            self.player.rect.y + 5, -1,
-                                            15, 'laser', 'center')
-                            self.bullets.add(bullet)
-                            self.allSprites.add(self.bullets)
-                            self.sounds['shoot'].play()
-                        else:
-                            leftbullet = Bullet(self.player.rect.x + 8,
-                                                self.player.rect.y + 5, -1,
-                                                15, 'laser', 'left')
-                            rightbullet = Bullet(self.player.rect.x + 38,
-                                                 self.player.rect.y + 5, -1,
-                                                 15, 'laser', 'right')
-                            self.bullets.add(leftbullet)
-                            self.bullets.add(rightbullet)
-                            self.allSprites.add(self.bullets)
-                            self.sounds['shoot2'].play()
+                    self.shoot_requested = True
+                elif e.key == K_TAB:
+                    self.cycle_speed()
 
     def make_enemies(self, current_time):
         enemies = EnemiesGroup(10, 5, current_time)
@@ -585,22 +818,137 @@ class SpaceInvaders(object):
             if self.should_exit(e):
                 sys.exit()
 
-    def game_step(self, current_time):
+    def get_human_action(self):
+        direction = 0
+
+        if self.keys[K_LEFT]:
+            direction = -1
+        elif self.keys[K_RIGHT]:
+            direction = 1
+
+        #action = (direction, self.shoot_requested)
+        shoot = self.shoot_requested
+        self.shoot_requested = False
+
+        return ACTIONS.index((direction, shoot))
+
+    def game_step(self, current_time, action_id):
+        score_before = self.score
+        ship_was_alive = self.shipAlive
+
         self.enemies.update(current_time)
 
+        direction, should_shoot = ACTIONS[action_id]
+
+        invalid_shoot = should_shoot and len(self.bullets) > 0
+
         if self.shipAlive:
-            self.player.update_logic(self.keys)
+            self.player.update_logic(direction)
 
         for obj in self.allSprites:
             if isinstance(obj, Bullet):
                 obj.update_logic()
 
+        reward = 0
+
+        shot_x = self.player.rect.centerx
+
+        will_hit = any(
+            enemy.rect.left <= shot_x <= enemy.rect.right
+            and enemy.rect.bottom < self.player.rect.top
+            for enemy in self.enemies
+        )
+
+        if should_shoot:
+            self.shoot()
+            if will_hit:
+                 reward += 1
+            #     #print("rewarded for having aim and shooting", reward)
+            # else:
+            #     reward -= 1
+            #     #print("punished for shooting without aim", reward)
+        else:
+            if will_hit and len(self.bullets) == 0:
+                reward -= 0.1
+        #         #print("punished for having aim but not shooting", reward)
+
         for mystery in self.mysteryGroup:
             mystery.update_logic(current_time)
 
         self.check_collisions(current_time)
+
         self.create_new_ship(self.makeNewShip, current_time)
         self.make_enemies_shoot(current_time)
+
+        for explosion in self.explosionsGroup:
+            explosion.update_logic(current_time)
+        
+        reward += self.score - score_before
+        #if reward != 0:
+        #    print("increased score", reward)
+
+        if ship_was_alive and not self.shipAlive:
+            reward -= 300
+
+        #if invalid_shoot:
+        #    reward -= 0.1
+
+        state = self.get_state()
+
+        _, heat1, _, heat2 = self.get_bullets()
+
+        heat = heat1 + heat2
+        
+        reward -= ( heat * 10)
+
+        #if heat > 0:
+        #    print("heat", reward)
+
+        #if heat > 0: print("HEAT", reward)
+
+        target_dx, _ = self.get_target()
+
+        if abs(target_dx) > 0.03:
+            reward -= abs(target_dx) * 100
+        #    print("punished for being far away", reward)
+        else:
+            reward += 0.1
+            #print("reward for something", reward)
+
+        done = self.gameOver
+
+        #if reward < 0:
+        #    print("reward", reward)
+
+        return state, reward, done
+
+    def render_frame(self):
+        # Allow closing the window and changing speed during AI training
+        for e in event.get():
+            if self.should_exit(e):
+                sys.exit()
+
+            if e.type == KEYDOWN and e.key == K_TAB:
+                self.cycle_speed()
+
+        current_time = time.get_ticks()
+
+        self.screen.blit(self.background, (0, 0))
+        self.allBlockers.update(self.screen)
+
+        self.scoreText2 = Text(
+            FONT, 20, str(self.score), GREEN, 85, 5
+        )
+
+        self.scoreText.draw(self.screen)
+        self.scoreText2.draw(self.screen)
+        self.livesText.draw(self.screen)
+
+        keys = key.get_pressed()
+        self.allSprites.update(keys, current_time)
+        self.explosionsGroup.update(self.simulation_time)
+
+        display.update()
 
     def main(self):
         while True:
@@ -631,7 +979,7 @@ class SpaceInvaders(object):
                 if not self.enemies and not self.explosionsGroup:
 
                     # Advance game time even though normal game_step() is paused
-                    for _ in range(self.steps_per_render):
+                    for _ in range(self.speed_multiplier):
                         self.simulation_time += STEP_MS
 
                     elapsed = self.simulation_time - self.gameTimer
@@ -662,15 +1010,21 @@ class SpaceInvaders(object):
                     self.scoreText2.draw(self.screen)
                     self.livesText.draw(self.screen)
                     self.check_input()
-                    for _ in range(self.steps_per_render):
+                    action = self.get_human_action()
+
+                    for _ in range(self.speed_multiplier):
                         self.simulation_time += STEP_MS
-                        self.game_step(self.simulation_time)
+                        state, reward, done = self.game_step(self.simulation_time, action)
+                        #if reward != 0:
+                        #    print(f"state: {state}, reward: {reward}, done: {done}")
+                        if done:
+                            break
 
                     self.allSprites.update(self.keys, currentTime)
                     self.explosionsGroup.update(self.simulation_time)
 
             elif self.gameOver:
-                for _ in range(self.steps_per_render):
+                for _ in range(self.speed_multiplier):
                     self.simulation_time += STEP_MS
 
                 self.enemyPosition = ENEMY_DEFAULT_POSITION
@@ -681,5 +1035,5 @@ class SpaceInvaders(object):
 
 
 if __name__ == '__main__':
-    game = SpaceInvaders()
+    game = SpaceInvaders(start_speed=1)
     game.main()
