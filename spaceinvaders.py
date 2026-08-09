@@ -509,10 +509,10 @@ class SpaceInvaders(object):
     def get_bullets(self):
         danger_bullets = [
             b for b in self.enemyBullets
-            if b.rect.right > self.player.rect.left
-            and b.rect.left < self.player.rect.right
+            if b.rect.right > self.player.rect.left - 2
+            and b.rect.left < self.player.rect.right + 2
             and b.rect.bottom <= self.player.rect.top
-            and (self.player.rect.top - b.rect.bottom) <= 70
+            and (self.player.rect.top - b.rect.bottom) <= 80
         ]
 
         # if len(danger_bullets) > 0:
@@ -589,10 +589,10 @@ class SpaceInvaders(object):
 
     def reset_game(self):
         self.allBlockers = sprite.Group(
+            self.make_blockers(0),
             self.make_blockers(1),
             self.make_blockers(2),
-            self.make_blockers(3),
-            self.make_blockers(4)
+            self.make_blockers(3)
         )
 
         self.livesGroup.add(self.life1, self.life2, self.life3)
@@ -912,14 +912,25 @@ class SpaceInvaders(object):
 
         #if heat > 0: print("HEAT", reward)
 
+        
+
         target_dx, _ = self.get_target()
+
+        if target_dx != 0:
+            proximity_reward = min (0.05 / abs(target_dx), 5)
+            reward += proximity_reward
+        else:
+            reward += 5
+
+        #print("proximity_reward", proximity_reward)
 
         if abs(target_dx) > 0.03:
             pass
             #reward -= abs(target_dx) * 100
         #    print("punished for being far away", reward)
         else:
-            reward += 0.1
+            pass
+            #reward += 0.1
             #print("reward for something", reward)
 
         done = self.gameOver
@@ -1037,7 +1048,7 @@ class SpaceInvaders(object):
                 self.create_game_over(self.simulation_time)
 
             display.update()
-            self.clock.tick(60)
+            self.clock.tick(30)
 
 
 if __name__ == '__main__':
