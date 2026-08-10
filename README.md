@@ -1,53 +1,95 @@
-# Space Invaders
+# Space Invaders RL
 
-[![Language](https://img.shields.io/badge/language-python-blue.svg?style=flat)](https://www.python.org)
-[![Module](https://img.shields.io/badge/module-pygame-brightgreen.svg?style=flat)](http://www.pygame.org/news.html)
-[![Release](https://img.shields.io/badge/release-v1.0-orange.svg?style=flat)](http://www.leejamesrobinson.com/space-invaders.html)
+This project is a reinforcement-learning experiment built on top of the original
+[Space Invaders](https://github.com/leerob/space-invaders) Pygame project by Lee Robinson.
 
-## About
+The original game was forked and refactored so that it can be controlled both by a human player and by a reinforcement-learning agent.
 
-Space Invaders is a two-dimensional fixed shooter game in which the player controls a ship with lasers by moving it horizontally
-across the bottom of the screen and firing at descending aliens. The aim is to defeat five rows of ten aliens that move
-horizontally back and forth across the screen as they advance towards the bottom of the screen. The player defeats an alien,
-and earns points, by shooting it with the laser cannon. As more aliens are defeated, the aliens' movement and the game's music
-both speed up.
+## What I changed
 
-The aliens attempt to destroy the ship by firing at it while they approach the bottom of the screen. If they reach the bottom,
-the alien invasion is successful and the game ends. A special "mystery ship" will occasionally move across the top of the
-screen and award bonus points if destroyed. The ship is partially protected by several stationary defense bunkers that are
-gradually destroyed by projectiles from the aliens and player.
+The game was modified to support:
 
-<img src="http://i.imgur.com/u2mss8o.png" width="300" height="240" />
-<img src="http://i.imgur.com/mR81p5O.png" width="300" height="240"/>
+- A fixed-step game simulation independent of rendering speed
+- Adjustable simulation speed
+- A discrete action interface for human and AI control
+- A custom Gymnasium environment
+- Reinforcement learning using Stable-Baselines3 DQN
+- Headless training without rendering
+- Model evaluation against a random-action baseline
+- Checkpointing and deterministic AI playback
 
-## How To Play
+## AI actions
 
-- If you don't have [Python](https://www.python.org/downloads/) or [Pygame](http://www.pygame.org/download.shtml) installed, you can simply double click the .exe file to play the game.
-  **Note:** _The .exe file needs to stay in the same directory as the sounds, images, and font folders._
+The agent has six possible actions:
 
-- If you have the correct version of Python and Pygame installed, you can run the program in the command prompt / terminal.
+1. Stay
+2. Move left
+3. Move right
+4. Shoot
+5. Move left + shoot
+6. Move right + shoot
 
-```bash
-cd SpaceInvaders
-python spaceinvaders.py
-```
+## Observation space
 
-**Note:** If you're using Python 3, replace the command "python" with "python3"
+The neural network receives a compact representation of the current game state rather than the raw screen image.
 
-**MacOS Mojave**: You need to use Python 3.7.2 or greater: [Source](https://github.com/pygame/pygame/issues/555)
+The current observation contains 25 values:
 
-## Demo
+- Player horizontal position
+- Relative X/Y position of the current target enemy
+- Enemy formation direction
+- Whether the player can currently shoot
+- Fraction of enemies remaining
+- Predicted danger when moving left
+- Predicted danger when staying still
+- Predicted danger when moving right
+- 16 horizontal bullet-danger lanes covering the screen
 
-[![Space Invaders](http://img.youtube.com/vi/_2yUP3WMDRc/0.jpg)](http://www.youtube.com/watch?v=_2yUP3WMDRc)
+The danger information is calculated from enemy bullet positions and predicted movement, allowing the agent to learn basic bullet avoidance.
 
-## Notable Forks
+## Reward system
 
-- [AI research project where four types of agents control the ship and play the game](https://github.com/scott-pickthorn/Space_Invaders)
-- [NEAT program that evolves to beat the game](https://github.com/lairsonm/neat-in-space-invaders)
+The reward function is intentionally kept relatively simple.
 
-## Contact
+The agent receives:
 
-Thanks for checking out my game and I hope you enjoy it! Feel free to contact me.
+- `+1` for destroying an enemy
+- `+5` for clearing a round
+- `-10` for losing a life
+- `-10` for game over
+- A very small time penalty to discourage wasting time
+- Small shaping rewards for moving toward the current target
+- Small shaping rewards or penalties for moving away from or toward bullet danger
 
-- Lee Robinson
-- lrobinson2011@gmail.com
+Earlier versions used much stronger reward shaping. This often caused the agent to exploit the reward function instead of actually learning to play the game.
+
+## Reinforcement learning
+
+The project uses:
+
+- **Pygame** — game simulation and rendering
+- **Gymnasium** — RL environment interface
+- **Stable-Baselines3** — DQN implementation
+- **PyTorch** — neural network backend
+- **NumPy** — observation representation
+
+The agent uses a DQN with an MLP policy and six discrete actions.
+
+## Results
+
+The trained agent learned to:
+
+- Track and approach enemy targets
+- Shoot enemies
+- Avoid many incoming bullets
+- Clear complete waves
+- Play substantially better than a random-action agent
+
+Example evaluation over 100 episodes:
+
+```text
+AI average reward:      349.47
+AI standard deviation:   29.52
+
+Random average reward:   -6.24
+Random std deviation:    12.57
