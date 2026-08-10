@@ -30,13 +30,10 @@ class SpaceInvadersEnv(gym.Env):
 
         self.observation_space = spaces.Box(
             low=np.array(
-                [0, -1, -1, -1, 0, 0] + [0] * 16,
+                [0, -1, -1, -1, 0, 0, 0, 0, 0] + [0] * 16,
                 dtype=np.float32
             ),
-            high=np.array(
-                [1, 1, 1, 1, 1, 1] + [1] * 16,
-                dtype=np.float32
-            ),
+            high=np.ones(25, dtype=np.float32),
             dtype=np.float32
         )
 

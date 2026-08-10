@@ -607,6 +607,24 @@ class SpaceInvaders(object):
 
         return danger
 
+    def get_move_danger(self, direction, steps=12):
+        player_rect = self.player.rect.copy()
+
+        for step in range(1, steps + 1):
+            # Predict player position
+            player_rect.x += direction * self.player.speed
+            player_rect.x = max(10, min(740, player_rect.x))
+
+            # Predict every enemy bullet
+            for bullet in self.enemyBullets:
+                bullet_rect = bullet.rect.copy()
+                bullet_rect.y += bullet.speed * bullet.direction * step
+
+                if player_rect.colliderect(bullet_rect):
+                    return 1.0
+
+        return 0.0
+
     def get_target(self):
         # Keep the current target as long as it is still alive
         if self.current_target is None or not self.enemies.has(self.current_target):
@@ -657,6 +675,10 @@ class SpaceInvaders(object):
             float(self.enemies.direction),
             1.0 if len(self.bullets) == 0 and self.shipAlive else 0.0,
             len(self.enemies) / 50.0,
+
+            self.get_move_danger(-1),  # danger if moving left
+            self.get_move_danger(0),   # danger if staying
+            self.get_move_danger(1),   # danger if moving right
         ]
 
         state.extend(danger_lanes)
