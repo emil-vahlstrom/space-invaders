@@ -373,6 +373,9 @@ class SpaceInvaders(object):
 
         self.shoot_requested = False
         #self.steps_per_render = steps_per_render
+
+        self.current_target = None
+
         # It seems, in Linux buffersize=512 is not enough, use 4096 to prevent:
         #   ALSA lib pcm.c:7963:(snd_pcm_recover) underrun occurred
         mixer.pre_init(44100, -16, 1, 4096)
@@ -558,11 +561,11 @@ class SpaceInvaders(object):
 
         for bullet in self.enemyBullets:
             # Ignore bullets that have already reached/passed the player
-            if bullet.rect.bottom > self.player.rect.top:
+            if bullet.rect.top >= self.player.rect.bottom:
                 continue
 
             # Distance from bottom of bullet to top of player
-            distance = self.player.rect.top - bullet.rect.bottom
+            distance = max(0, self.player.rect.top - bullet.rect.bottom)
 
             # 0 = far away, 1 = about to hit player height
             danger = 1.0 - min(distance / 500.0, 1.0)
@@ -576,34 +579,68 @@ class SpaceInvaders(object):
 
         return lanes
 
+    def get_player_danger(self):
+        danger = 0.0
+
+        for bullet in self.enemyBullets:
+            # Ignore bullet only after it has completely passed the ship
+            if bullet.rect.top >= self.player.rect.bottom:
+                continue
+
+            # Horizontal gap between bullet and player hitboxes
+            if bullet.rect.right < self.player.rect.left:
+                x_gap = self.player.rect.left - bullet.rect.right
+            elif bullet.rect.left > self.player.rect.right:
+                x_gap = bullet.rect.left - self.player.rect.right
+            else:
+                x_gap = 0  # horizontally overlapping
+
+            # Vertical gap
+            y_gap = max(0, self.player.rect.top - bullet.rect.bottom)
+
+            # Only care about reasonably nearby bullets
+            x_danger = 1.0 - min(x_gap / 100.0, 1.0)
+            y_danger = 1.0 - min(y_gap / 200.0, 1.0)
+
+            bullet_danger = x_danger * y_danger
+            danger = max(danger, bullet_danger)
+
+        return danger
 
     def get_target(self):
-        candidates = []
+        # Keep the current target as long as it is still alive
+        if self.current_target is None or not self.enemies.has(self.current_target):
+            candidates = []
 
-        # Only consider the bottom-most living enemy in each column
-        for column in range(self.enemies.columns):
-            for row in range(self.enemies.rows - 1, -1, -1):
-                enemy = self.enemies.enemies[row][column]
+            # Find bottom-most living enemy in each column
+            for column in range(self.enemies.columns):
+                for row in range(self.enemies.rows - 1, -1, -1):
+                    enemy = self.enemies.enemies[row][column]
 
-                if enemy is not None:
-                    candidates.append(enemy)
-                    break
+                    if enemy is not None and self.enemies.has(enemy):
+                        candidates.append(enemy)
+                        break
 
-        target = min(
-            candidates,
-            key=lambda e: abs(e.rect.centerx - self.player.rect.centerx),
-            default=None
-        )
+            # Choose the closest candidate only when we need a new target
+            self.current_target = min(
+                candidates,
+                key=lambda e: abs(
+                    e.rect.centerx - self.player.rect.centerx
+                ),
+                default=None
+            )
 
-        if target is None:
+        if self.current_target is None:
             return 0.0, 0.0
 
         target_dx = (
-            target.rect.centerx - self.player.rect.centerx
+            self.current_target.rect.centerx -
+            self.player.rect.centerx
         ) / 800
 
         target_dy = (
-            target.rect.centery - self.player.rect.centery
+            self.current_target.rect.centery -
+            self.player.rect.centery
         ) / 600
 
         return target_dx, target_dy
@@ -887,10 +924,17 @@ class SpaceInvaders(object):
         # Measure target distance before player's action
         target_before_dx, _ = self.get_target()
 
+        #danger_lanes_before = self.get_danger_lanes()
+        #danger_before = self.get_player_danger(danger_lanes_before)
+        danger_before = self.get_player_danger()
+
         direction, should_shoot = ACTIONS[action_id]
 
         if self.shipAlive:
             self.player.update_logic(direction)
+
+        #danger_after_move = self.get_player_danger(danger_lanes_before)
+        danger_after_move = self.get_player_danger()
 
         for obj in self.allSprites:
             if isinstance(obj, Bullet):
@@ -915,6 +959,9 @@ class SpaceInvaders(object):
         # --------------------
 
         reward = -0.001  # tiny cost for wasting time
+
+        if ship_was_alive:
+            reward += (danger_before - danger_after_move) * 0.05
 
         enemies_killed = enemies_before - len(self.enemies)
 
