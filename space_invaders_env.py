@@ -20,11 +20,23 @@ class SpaceInvadersEnv(gym.Env):
         self.action_space = spaces.Discrete(6)
 
         # State contains three normalized numbers
+        # self.observation_space = spaces.Box(
+        #     #low=np.zeros(7, dtype=np.float32),
+        #     #high=np.ones(7, dtype=np.float32),
+        #     low=np.array([0, -1, 0, -1, 0, -1, -1, 0, 0], dtype=np.float32),
+        #     high=np.ones(9, dtype=np.float32),
+        #     dtype=np.float32
+        # )
+
         self.observation_space = spaces.Box(
-            #low=np.zeros(7, dtype=np.float32),
-            #high=np.ones(7, dtype=np.float32),
-            low=np.array([0, -1, 0, -1, 0, -1, -1, 0, 0], dtype=np.float32),
-            high=np.ones(9, dtype=np.float32),
+            low=np.array(
+                [0, -1, -1, -1, 0, 0] + [0] * 16,
+                dtype=np.float32
+            ),
+            high=np.array(
+                [1, 1, 1, 1, 1, 1] + [1] * 16,
+                dtype=np.float32
+            ),
             dtype=np.float32
         )
 

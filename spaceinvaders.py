@@ -553,39 +553,78 @@ class SpaceInvaders(object):
 
         return bullet1_dx, bullet1_vertical_heat, bullet2_dx, bullet2_vertical_heat
 
+    def get_danger_lanes(self):
+        lanes = np.zeros(16, dtype=np.float32)
+
+        for bullet in self.enemyBullets:
+            # Ignore bullets that have already reached/passed the player
+            if bullet.rect.bottom > self.player.rect.top:
+                continue
+
+            # Distance from bottom of bullet to top of player
+            distance = self.player.rect.top - bullet.rect.bottom
+
+            # 0 = far away, 1 = about to hit player height
+            danger = 1.0 - min(distance / 500.0, 1.0)
+
+            # Screen is 800px wide -> 16 lanes of 50px
+            lane = int(bullet.rect.centerx / 50)
+            lane = max(0, min(15, lane))
+
+            # Keep the most dangerous bullet in each lane
+            lanes[lane] = max(lanes[lane], danger)
+
+        return lanes
+
+
     def get_target(self):
+        candidates = []
+
+        # Only consider the bottom-most living enemy in each column
+        for column in range(self.enemies.columns):
+            for row in range(self.enemies.rows - 1, -1, -1):
+                enemy = self.enemies.enemies[row][column]
+
+                if enemy is not None:
+                    candidates.append(enemy)
+                    break
+
         target = min(
-            self.enemies,
+            candidates,
             key=lambda e: abs(e.rect.centerx - self.player.rect.centerx),
             default=None
         )
 
-        target_dx = (target.rect.centerx - self.player.rect.centerx) / 800 if target else 0
-        target_dy = (target.rect.centery - self.player.rect.centery) / 600 if target else 0
+        if target is None:
+            return 0.0, 0.0
+
+        target_dx = (
+            target.rect.centerx - self.player.rect.centerx
+        ) / 800
+
+        target_dy = (
+            target.rect.centery - self.player.rect.centery
+        ) / 600
 
         return target_dx, target_dy
 
+
     def get_state(self):
-        bullet1_dx, bullet1_vertical_heat, bullet2_dx, bullet2_vertical_heat = self.get_bullets()
-
         target_dx, target_dy = self.get_target()
+        danger_lanes = self.get_danger_lanes()
 
-        enemy_direction = self.enemies.direction
-
-        return np.array([
-            self.player.rect.x / 800,
-
-            bullet1_dx,
-            bullet1_vertical_heat,
-            bullet2_dx,
-            bullet2_vertical_heat,
-
+        state = [
+            self.player.rect.centerx / 800,
             target_dx,
             target_dy,
+            float(self.enemies.direction),
+            1.0 if len(self.bullets) == 0 and self.shipAlive else 0.0,
+            len(self.enemies) / 50.0,
+        ]
 
-            1.0 if self.bullets else 0.0,
-            1.0 if enemy_direction == 1 else 0.0
-        ], dtype=np.float32)
+        state.extend(danger_lanes)
+
+        return np.array(state, dtype=np.float32)
 
     def reset_game(self):
         self.allBlockers = sprite.Group(
@@ -839,14 +878,16 @@ class SpaceInvaders(object):
         return ACTIONS.index((direction, shoot))
 
     def game_step(self, current_time, action_id):
-        score_before = self.score
+        enemies_before = len(self.enemies)
         ship_was_alive = self.shipAlive
 
+        # Move enemies first
         self.enemies.update(current_time)
 
-        direction, should_shoot = ACTIONS[action_id]
+        # Measure target distance before player's action
+        target_before_dx, _ = self.get_target()
 
-        invalid_shoot = should_shoot and len(self.bullets) > 0
+        direction, should_shoot = ACTIONS[action_id]
 
         if self.shipAlive:
             self.player.update_logic(direction)
@@ -855,28 +896,8 @@ class SpaceInvaders(object):
             if isinstance(obj, Bullet):
                 obj.update_logic()
 
-        reward = 0
-
-        shot_x = self.player.rect.centerx
-
-        will_hit = any(
-            enemy.rect.left <= shot_x <= enemy.rect.right
-            and enemy.rect.bottom < self.player.rect.top
-            for enemy in self.enemies
-        )
-
         if should_shoot:
             self.shoot()
-            if will_hit:
-                 reward += 1
-            #     #print("rewarded for having aim and shooting", reward)
-            # else:
-            #     reward -= 1
-            #     #print("punished for shooting without aim", reward)
-        else:
-            if will_hit and len(self.bullets) == 0:
-                reward -= 0.1
-        #         #print("punished for having aim but not shooting", reward)
 
         for mystery in self.mysteryGroup:
             mystery.update_logic(current_time)
@@ -888,54 +909,46 @@ class SpaceInvaders(object):
 
         for explosion in self.explosionsGroup:
             explosion.update_logic(current_time)
-        
-        reward += self.score - score_before
-        #if reward != 0:
-        #    print("increased score", reward)
 
+        # --------------------
+        # Reward
+        # --------------------
+
+        reward = -0.001  # tiny cost for wasting time
+
+        enemies_killed = enemies_before - len(self.enemies)
+
+        # Actual success
+        reward += enemies_killed * 1.0
+
+        # Clearing a round
+        if enemies_before > 0 and len(self.enemies) == 0:
+            reward += 5.0
+
+        # Losing a life
         if ship_was_alive and not self.shipAlive:
-            reward -= 300
+            reward -= 10.0
 
-        #if invalid_shoot:
-        #    reward -= 0.1
+        # Game over caused by enemies reaching bottom
+        elif self.gameOver:
+            reward -= 10.0
+
+        # Tiny reward for actually moving closer to target
+        if enemies_killed == 0 and self.enemies:
+            target_after_dx, _ = self.get_target()
+
+            target_progress = (
+                abs(target_before_dx) - abs(target_after_dx)
+            )
+
+            reward += float(np.clip(
+                target_progress,
+                -0.01,
+                0.01
+            ))
 
         state = self.get_state()
-
-        _, heat1, _, heat2 = self.get_bullets()
-
-        heat = heat1 + heat2
-        
-        reward -= ( heat * 10)
-
-        #if heat > 0: print("heat", reward)
-            #input("kill me")
-
-        #if heat > 0: print("HEAT", reward)
-
-        
-
-        target_dx, _ = self.get_target()
-
-        if target_dx != 0:
-            proximity_reward = min (0.05 / abs(target_dx), 5)
-            reward += proximity_reward
-        else:
-            reward += 5
-
-        #print("proximity_reward", proximity_reward)
-
-        if abs(target_dx) > 0.03:
-            pass
-            #reward -= abs(target_dx) * 100
-        #    print("punished for being far away", reward)
-        else:
-            pass
-            #reward += 0.1
-            #print("reward for something", reward)
-
         done = self.gameOver
-
-        #if reward < -1 or reward > 1: print("reward", reward)
 
         return state, reward, done
 
